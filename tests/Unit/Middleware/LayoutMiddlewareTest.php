@@ -67,6 +67,12 @@ function stubMatcher(?MatchedRoute $matched): RouteMatcherInterface
 {
     return new class ($matched) implements RouteMatcherInterface
     {
+        public function allowedMethods(
+            string $path,
+        ): array {
+            return [];
+        }
+
         public function __construct(private readonly ?MatchedRoute $stub) {}
 
         public function match(
