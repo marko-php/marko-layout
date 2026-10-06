@@ -12,6 +12,7 @@ use Marko\Layout\Attributes\Layout;
 use Marko\Layout\LayoutProcessorInterface;
 use Marko\Layout\Middleware\LayoutMiddleware;
 use Marko\Routing\Exceptions\HttpException;
+use Marko\Routing\Http\Cookie;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\Middleware\MiddlewareInterface;
@@ -34,6 +35,29 @@ class DashboardController
     public function missing(): Response
     {
         throw HttpException::notFound('Order not found.');
+    }
+
+    public function decorated(): Response
+    {
+        return new Response('controller body', 200, ['X-Controller' => 'set', 'Content-Type' => 'text/plain'])
+            ->withCookie(new Cookie('controller_cookie', 'from-controller'));
+    }
+}
+
+/**
+ * Route middleware that decorates the response on the way out, as a session,
+ * remember-me or cache-control middleware would.
+ */
+class DecoratesResponseMiddleware implements MiddlewareInterface
+{
+    public function handle(
+        Request $request,
+        callable $next,
+    ): Response {
+        return $next($request)
+            ->withHeader('X-Route-Middleware', 'kept')
+            ->withHeader('Cache-Control', 'no-store')
+            ->withCookie(new Cookie('route_cookie', 'from-middleware'));
     }
 }
 
@@ -80,7 +104,8 @@ class RecordingLayoutProcessor implements LayoutProcessorInterface
     ): Response {
         $this->calls++;
 
-        return Response::html('<dashboard>secret account data</dashboard>');
+        return Response::html('<dashboard>secret account data</dashboard>')
+            ->withCookie(new Cookie('controller_cookie', 'from-layout'));
     }
 }
 
@@ -121,6 +146,18 @@ function dashboardRequest(
     array $server = [],
 ): Request {
     return new Request(server: ['REQUEST_METHOD' => 'GET', 'REQUEST_URI' => '/dashboard', ...$server]);
+}
+
+/**
+ * @return list<string>
+ */
+function cookiePairs(
+    Response $response,
+): array {
+    return array_map(
+        fn (Cookie $cookie): string => $cookie->name() . '=' . $cookie->value(),
+        $response->cookies(),
+    );
 }
 
 describe('LayoutMiddleware as global middleware through Router::handle()', function (): void {
@@ -167,5 +204,33 @@ describe('LayoutMiddleware as global middleware through Router::handle()', funct
         expect($response->statusCode())->toBe(404)
             ->and($response->body())->toContain('Order not found.')
             ->and($processor->calls)->toBe(0);
+    });
+
+    it('keeps a cookie and a custom header set by route middleware on a layout-rendered 2xx', function (): void {
+        $processor = new RecordingLayoutProcessor();
+        $router = bootLayoutRouter('index', [DecoratesResponseMiddleware::class], $processor);
+
+        $response = $router->handle(dashboardRequest());
+        $cookies = cookiePairs($response);
+
+        expect($response->statusCode())->toBe(200)
+            ->and($response->body())->toBe('<dashboard>secret account data</dashboard>')
+            ->and($response->headers()['X-Route-Middleware'])->toBe('kept')
+            ->and($response->headers()['Cache-Control'])->toBe('no-store')
+            ->and($cookies)->toContain('route_cookie=from-middleware')
+            ->and($processor->calls)->toBe(1);
+    });
+
+    it('keeps headers and cookies the controller set, letting the layout win on conflicts', function (): void {
+        $processor = new RecordingLayoutProcessor();
+        $router = bootLayoutRouter('decorated', [], $processor);
+
+        $response = $router->handle(dashboardRequest());
+        $cookies = cookiePairs($response);
+
+        expect($response->body())->toBe('<dashboard>secret account data</dashboard>')
+            ->and($response->headers()['X-Controller'])->toBe('set')
+            ->and($response->headers()['Content-Type'])->toBe('text/html; charset=utf-8')
+            ->and($cookies)->toBe(['controller_cookie=from-layout']);
     });
 });
