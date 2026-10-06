@@ -7,6 +7,7 @@ use Marko\Layout\Attributes\Layout;
 use Marko\Layout\LayoutProcessorInterface;
 use Marko\Layout\LayoutResolver;
 use Marko\Layout\Middleware\LayoutMiddleware;
+use Marko\Routing\Attributes\RunsInnermost;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\MatchedRoute;
@@ -129,6 +130,12 @@ function makeRequest(string $path = '/test'): Request
 }
 
 describe('LayoutMiddleware', function (): void {
+    it('is marked #[RunsInnermost] so route middleware wraps the rendered layout', function (): void {
+        $attributes = new ReflectionClass(LayoutMiddleware::class)->getAttributes(RunsInnermost::class);
+
+        expect($attributes)->toHaveCount(1);
+    });
+
     it('delegates to LayoutProcessor when controller has Layout attribute', function (): void {
         $route = makeRoute(LmFixtureController::class, 'index');
         $matched = new MatchedRoute($route, []);
