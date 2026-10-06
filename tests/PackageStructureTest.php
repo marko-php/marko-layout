@@ -56,14 +56,8 @@ it('binds ComponentCollectorInterface to DiscoveringComponentCollector in module
         ->and($module['bindings'][ComponentCollectorInterface::class])->toBe(DiscoveringComponentCollector::class);
 });
 
-it('has a config/layout.php that returns a configuration array', function (): void {
-    $configPath = dirname(__DIR__) . '/config/layout.php';
-
-    expect(file_exists($configPath))->toBeTrue();
-
-    $config = require $configPath;
-
-    expect($config)->toBeArray();
+it('ships no config file, since layouts and components are discovered from attributes', function (): void {
+    expect(is_dir(dirname(__DIR__) . '/config'))->toBeFalse();
 });
 
 it('module.php declares LayoutMiddleware as globalMiddleware', function (): void {
