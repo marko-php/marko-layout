@@ -213,7 +213,7 @@ describe('LayoutMiddleware', function (): void {
         expect($nextInvoked)->toBeTrue();
     });
 
-    it('ignores controller return value when Layout is present', function (): void {
+    it('replaces a successful controller result with the layout output', function (): void {
         $route = makeRoute(LmFixtureController::class, 'index');
         $matched = new MatchedRoute($route, []);
         $matcher = stubMatcher($matched);
@@ -221,14 +221,40 @@ describe('LayoutMiddleware', function (): void {
 
         $middleware = new LayoutMiddleware($matcher, $processor, new LayoutResolver());
         $request = makeRequest();
-        // The $next callable would normally return the controller's response
-        $next = fn (Request $r): Response => new Response('controller output that should be ignored');
+        $next = fn (Request $r): Response => new Response('controller output replaced by layout');
 
         $response = $middleware->handle($request, $next);
 
-        // Response must come from LayoutProcessor, not from $next
-        expect($response->body())->toBe('<layout-output/>');
+        expect($response->body())->toBe('<layout-output/>')
+            ->and($processor->calledController)->toBe(LmFixtureController::class);
     });
+
+    it('passes non-successful inner responses through untouched without rendering the layout', function (
+        Response $inner,
+    ): void {
+        $route = makeRoute(LmFixtureController::class, 'index');
+        $matched = new MatchedRoute($route, []);
+        $matcher = stubMatcher($matched);
+        $processor = stubProcessor(Response::html('<layout-output/>'));
+
+        $middleware = new LayoutMiddleware($matcher, $processor, new LayoutResolver());
+        $request = makeRequest();
+        $next = fn (Request $r): Response => $inner;
+
+        $response = $middleware->handle($request, $next);
+
+        expect($response)->toBe($inner)
+            ->and($processor->calledController)->toBeNull();
+    })->with([
+        '302 login redirect' => fn (): Response => Response::redirect('/login'),
+        '401 unauthorized' => fn (): Response => new Response('Unauthorized', 401),
+        '403 forbidden' => fn (): Response => new Response('Forbidden', 403),
+        '404 not found' => fn (): Response => new Response('Not Found', 404),
+        '419 csrf mismatch' => fn (): Response => new Response('Page Expired', 419),
+        '429 rate limited' => fn (): Response => new Response('Too Many Requests', 429),
+        '500 server error' => fn (): Response => new Response('Server Error', 500),
+        '2xx with Location header' => fn (): Response => new Response('', 201, ['Location' => '/posts/1']),
+    ]);
 
     it('works within the middleware pipeline', function (): void {
         // Middleware that runs before LayoutMiddleware — should see the request pass through

@@ -39,9 +39,17 @@ readonly class LayoutMiddleware implements MiddlewareInterface
             return $next($request);
         }
 
-        // Invoke the controller action for side effects (authorization, etc.),
-        // but ignore its return value — layout components provide their own data.
-        $next($request);
+        // Run the rest of the pipeline (route middleware + controller) first.
+        // Inner denials — auth redirects, 401/403/419/429, 404s thrown by the
+        // controller — arrive here as ordinary responses because the pipeline
+        // renders HTTP exceptions at the depth they are thrown. They must reach
+        // the client untouched; only a successful controller result is replaced
+        // by the layout, whose components provide their own data.
+        $response = $next($request);
+
+        if (!$this->isSuccessfulResult($response)) {
+            return $response;
+        }
 
         return $this->layoutProcessor->process(
             controllerClass: $controllerClass,
@@ -50,5 +58,23 @@ readonly class LayoutMiddleware implements MiddlewareInterface
             routeParameters: $matched->parameters,
             request: $request,
         );
+    }
+
+    private function isSuccessfulResult(
+        Response $response,
+    ): bool {
+        $status = $response->statusCode();
+
+        if ($status < 200 || $status >= 300) {
+            return false;
+        }
+
+        foreach (array_keys($response->headers()) as $name) {
+            if (strtolower($name) === 'location') {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
